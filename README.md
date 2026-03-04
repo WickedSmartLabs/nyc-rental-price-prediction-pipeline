@@ -1,210 +1,166 @@
-# Build an ML Pipeline for Short-Term Rental Prices in NYC
-You are working for a property management company renting rooms and properties for short periods of 
-time on various rental platforms. You need to estimate the typical price for a given property based 
-on the price of similar properties. Your company receives new data in bulk every week. The model needs 
-to be retrained with the same cadence, necessitating an end-to-end pipeline that can be reused.
+# NYC Short-Term Rental Pricing Pipeline
 
-In this project you will build such a pipeline.
+A production-style machine learning pipeline that trains and retrains a pricing model for short-term rental listings in New York City. The system ingests weekly batch data, validates and cleans it, performs feature filtering for geographic and price constraints, trains and tunes a model, and publishes a versioned "production" model artifact for downstream consumption.
 
-## Table of contents
+This project emphasizes repeatability, experiment tracking, and reliable model promotion rather than one-off modeling work.
 
-- [Preliminary steps](#preliminary-steps)
-  * [Fork the Starter Kit](#fork-the-starter-kit)
-  * [Create environment](#create-environment)
-  * [Get API key for Weights and Biases](#get-api-key-for-weights-and-biases)
-  * [The configuration](#the-configuration)
-  * [Running the entire pipeline or just a selection of steps](#Running-the-entire-pipeline-or-just-a-selection-of-steps)
-  * [Pre-existing components](#pre-existing-components)
+---
 
-## Preliminary steps
+## Why This Project
 
-### Supported Operating Systems
+Many machine learning models never make it beyond notebooks. This project focuses on building the infrastructure around the model — automated retraining, data validation gates, experiment tracking, and a promotion mechanism that mirrors how ML systems are managed in production environments.
 
-This project is compatible with the following operating systems:
+The goal was to engineer a pipeline that could be handed off, scheduled, and rerun reliably — not just a model that works once.
 
-- **Ubuntu 22.04** (Jammy Jellyfish) - both Ubuntu installation and WSL (Windows Subsystem for Linux)
-- **Ubuntu 24.04** - both Ubuntu installation and WSL (Windows Subsystem for Linux)
-- **macOS** - compatible with recent macOS versions
+---
 
-Please ensure you are using one of the supported OS versions to avoid compatibility issues.
+## Problem
 
-### Python Requirement
+Property management teams need consistent, data-driven pricing estimates for new and existing listings. Rental marketplaces change quickly, and new bulk data arrives regularly, meaning pricing models can drift and require routine retraining.
 
-This project requires **Python 3.13**. Please ensure that you have Python 3.13 installed and set as the default version in your environment to avoid any runtime issues.
+Without an automated pipeline, retraining becomes manual, error-prone, and difficult to reproduce — especially when tracking experiments, data versions, and model lineage.
 
-### Fork the Starter kit
-Go to [https://github.com/udacity/Project-Build-an-ML-Pipeline-Starter](https://github.com/udacity/Project-Build-an-ML-Pipeline-Starter)
-and click on `Fork` in the upper right corner. This will create a fork in your Github account, i.e., a copy of the
-repository that is under your control. Now clone the repository locally so you can start working on it:
+---
+
+## Solution
+
+This repository implements an end-to-end ML training pipeline that can be executed on demand or on a schedule (e.g., weekly). The pipeline:
+
+- Ingests raw listing data in batch form
+- Applies repeatable cleaning and validation rules
+- Splits data into train/validation/test sets
+- Trains a baseline model and runs hyperparameter optimization
+- Registers and versions model artifacts
+- Promotes a selected model to a `prod` stage/tag for deployment workflows
+
+The result is a repeatable training system that produces traceable, versioned models and metrics.
+
+---
+
+## System Architecture
+
+![Pipeline Architecture](images/pipeline_architecture.png)
+
+```mermaid
+flowchart TD
+    A[Raw Airbnb Dataset] --> B[Data Cleaning]
+    B --> C[Data Validation]
+    C --> D[Train / Validation / Test Split]
+    D --> E[Model Training]
+    E --> F[Hyperparameter Optimization]
+    F --> G[MLflow Model Artifact]
+    G --> H[Production Model]
+```
+
+### Key Components
+
+| Component | Description |
+|---|---|
+| **Pipeline Orchestrator** | Runs pipeline steps end-to-end or as selected stages |
+| **Data Quality Layer** | Validation tests and deterministic cleaning rules |
+| **Training & Tuning** | Random Forest baseline plus hyperparameter search |
+| **Model Registry / Artifacts** | Versioned exports and production tagging |
+| **Experiment Tracking** | Metrics and lineage captured for reproducibility |
+
+---
+
+## Project Structure
 
 ```
-git clone https://github.com/WickedSmartLabs/Project-Build-an-ML-Pipeline-Starter
+nyc-rental-price-prediction-pipeline/
+├── components/         # Reusable ML pipeline components
+├── src/                # Pipeline orchestration and logic
+├── images/             # Documentation diagrams
+├── MLproject           # MLflow pipeline configuration
+├── main.py             # Pipeline entry point
+├── config.yaml         # Pipeline configuration (Hydra)
+├── rf_config.json      # Model hyperparameters
+├── conda.yml           # MLflow runtime environment
+└── environment.yml     # Development environment
 ```
 
-and go into the repository:
+---
 
-```
-cd Project-Build-an-ML-Pipeline-Starter
-```
-Commit and push to the repository often while you make progress towards the solution. Remember 
-to add meaningful commit messages.
+## Technologies Used
 
-### Create environment
-Make sure to have conda installed and ready, then create a new environment using the ``environment.yaml``
-file provided in the root of the repository and activate it:
+- Python
+- MLflow *(pipeline execution + model packaging/versioning)*
+- Weights & Biases *(experiment tracking)*
+- Hydra *(configuration management)*
+- Pandas / Scikit-learn
+- Random Forest Regressor
+- Data validation tests
+
+---
+
+## Example Usage
+
+**Run the full pipeline:**
 
 ```bash
-> conda env create -f environment.yml
-> conda activate nyc_airbnb_dev
+mlflow run .
 ```
 
-### Get API key for Weights and Biases
-Let's make sure we are logged in to Weights & Biases. Get your API key from W&B by going to 
-[https://wandb.ai/authorize](https://wandb.ai/authorize) and click on the + icon (copy to clipboard), 
-then paste your key into this command: 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
+**Run specific steps (during development):**
 
 ```bash
-> wandb login [your API key]
+mlflow run . -P steps=download,basic_cleaning
 ```
 
-You should see a message similar to:
-```
-wandb: Appending key for api.wandb.ai to your netrc file: /home/[your username]/.netrc
-```
-
-
-### The configuration
-As usual, the parameters controlling the pipeline are defined in the ``config.yaml`` file defined in
-the root of the starter kit. We will use Hydra to manage this configuration file. 
-Open this file and get familiar with its content. Remember: this file is only read by the ``main.py`` script 
-(i.e., the pipeline) and its content is
-available with the ``go`` function in ``main.py`` as the ``config`` dictionary. For example,
-the name of the project is contained in the ``project_name`` key under the ``main`` section in
-the configuration file. It can be accessed from the ``go`` function as 
-``config["main"]["project_name"]``.
-
-NOTE: do NOT hardcode any parameter when writing the pipeline. All the parameters should be 
-accessed from the configuration file.
-
-### Running the entire pipeline or just a selection of steps
-In order to run the pipeline when you are developing, you need to be in the root of the starter kit, 
-then you can execute as usual:
+**Override configuration at runtime:**
 
 ```bash
->  mlflow run .
-```
-This will run the entire pipeline.
-
-When developing it is useful to be able to run one step at the time. Say you want to run only
-the ``download`` step. The `main.py` is written so that the steps are defined at the top of the file, in the 
-``_steps`` list, and can be selected by using the `steps` parameter on the command line:
-
-```bash
-> mlflow run . -P steps=download
-```
-If you want to run the ``download`` and the ``basic_cleaning`` steps, you can similarly do:
-```bash
-> mlflow run . -P steps=download,basic_cleaning
-```
-You can override any other parameter in the configuration file using the Hydra syntax, by
-providing it as a ``hydra_options`` parameter. For example, say that we want to set the parameter
-modeling -> random_forest -> n_estimators to 10 and etl->min_price to 50:
-
-```bash
-> mlflow run . \
+mlflow run . \
   -P steps=download,basic_cleaning \
-  -P hydra_options="modeling.random_forest.n_estimators=10 etl.min_price=50"
+  -P hydra_options="modeling.random_forest.n_estimators=200 etl.min_price=50"
 ```
-
-### Pre-existing components
-In order to simulate a real-world situation, we are providing you with some pre-implemented
-re-usable components. While you have a copy in your fork, you will be using them from the original
-repository by accessing them through their GitHub link, like:
-
-```python
-_ = mlflow.run(
-                f"{config['main']['components_repository']}/get_data",
-                "main",
-                version='main',
-                env_manager="conda",
-                parameters={
-                    "sample": config["etl"]["sample"],
-                    "artifact_name": "sample.csv",
-                    "artifact_type": "raw_data",
-                    "artifact_description": "Raw file as downloaded"
-                },
-            )
-```
-where `config['main']['components_repository']` is set to 
-[https://github.com/udacity/Project-Build-an-ML-Pipeline-Starter/tree/main/components](https://github.com/udacity/Project-Build-an-ML-Pipeline-Starter/tree/main/components).
-You can see the parameters that they require by looking into their `MLproject` file:
-
-- `get_data`: downloads the data. [MLproject](https://github.com/udacity/Project-Build-an-ML-Pipeline-Starter/blob/main/components/get_data/MLproject)
-- `train_val_test_split`: segrgate the data (splits the data) [MLproject](https://github.com/udacity/Project-Build-an-ML-Pipeline-Starter/blob/main/components/train_val_test_split/MLproject)
-
-## In case of errors
-
-### Environments
-When you make an error writing your `conda.yml` file, you might end up with an environment for the pipeline or one
-of the components that is corrupted. Most of the time `mlflow` realizes that and creates a new one every time you try
-to fix the problem. However, sometimes this does not happen, especially if the problem was in the `pip` dependencies.
-In that case, you might want to clean up all conda environments created by `mlflow` and try again. In order to do so,
-you can get a list of the environments you are about to remove by executing:
-
-```
-> conda info --envs | grep mlflow | cut -f1 -d" "
-```
-
-If you are ok with that list, execute this command to clean them up:
-
-**_NOTE_**: this will remove *ALL* the environments with a name starting with `mlflow`. Use at your own risk
-
-```
-> for e in $(conda info --envs | grep mlflow | cut -f1 -d" "); do conda uninstall --name $e --all -y;done
-```
-
-This will iterate over all the environments created by `mlflow` and remove them.
-
-### MLflow & Wandb
-
-If you see the any error while running the command:
-
-```
-> mlflow run .
-```
-
-Please, make sure all steps are using **the same** python version and that you have **conda installed**. Additionally, *mlflow* and *wandb* packages are crucial and should have the same version.
-
-
-## License
-
-[License](LICENSE.txt)
 
 ---
 
-## Final Project Links
+## Key Features
 
-### GitHub Repository
-https://github.com/WickedSmartLabs/Project-Build-an-ML-Pipeline-Starter
-
-### Weights & Biases Project
-https://wandb.ai/wickedsmartlabs-western/nyc_airbnb
+- Repeatable end-to-end training workflow (batch retraining ready)
+- Configuration-driven pipeline (no hardcoded parameters)
+- Data cleaning and validation gates before training
+- Geographic boundary filtering for NYC listings
+- Train/validation/test split for reliable evaluation
+- Hyperparameter optimization to improve model performance
+- Versioned model artifacts with a production promotion mechanism (`prod` tag)
 
 ---
 
-## Final Release
+## Outputs
 
-The final stable release of the pipeline is:
+The pipeline produces:
 
-**v1.0.6**
+- Cleaned and filtered datasets (intermediate artifacts)
+- Train/validation/test splits
+- Model metrics (tracked per run)
+- Versioned model artifacts (exported via MLflow)
+- A promoted "production" model tagged as `prod`
 
-This release includes:
-- Data cleaning with price filtering
-- NYC longitude/latitude boundary filtering
+---
+
+## Future Improvements
+
+- Add a scheduled retraining workflow (Prefect/Airflow/cron) with notifications
+- Introduce model performance monitoring and drift detection
+- Add feature store integration for consistent feature computation
+- Containerize pipeline execution for environment parity (Docker)
+- Add CI checks for data validation + pipeline smoke tests
+- Add a lightweight inference API or batch scoring job to complete the MLOps loop
+
+---
+
+## Release Notes
+
+The current stable release includes:
+
+- Deterministic cleaning and filtering
+- Geographic boundary filtering for NYC longitude/latitude ranges
 - Data validation tests
 - Train/validation/test split
 - Random Forest training
 - Hyperparameter optimization
-- Model export with MLflow
-- Production model tagged as `prod`
-- Successful retraining on `sample2.csv`
+- Model export and versioning via MLflow
+- Production model tagging (`prod`)
